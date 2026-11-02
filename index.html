@@ -204,7 +204,7 @@
 
     <!-- YOUTUBE -->
     <div class="panel card" id="panel-youtube">
-      <p class="help">Paste a video link. Then open the video, click <b>...more</b> under it, click <b>Show transcript</b>, select all the transcript text, copy it, and paste it below. (In Level 3 this becomes automatic.)</p>
+      <p class="help">Paste a video link and tap <b>Save to Brain</b>. Your brain grabs the transcript by itself. If it can't, paste the transcript in the box yourself and save again.</p>
       <div class="field"><input type="url" id="ytUrl" placeholder="https://www.youtube.com/watch?v=..." oninput="ytLookup()"></div>
       <div class="yt-preview" id="ytPreview">
         <img id="ytThumb" alt="">
@@ -213,7 +213,7 @@
           <div class="row"><a class="link-btn" id="ytLink" target="_blank" rel="noopener">Open video to get transcript ↗</a></div>
         </div>
       </div>
-      <textarea id="ytText" placeholder="Paste the transcript here..." rows="6"></textarea>
+      <textarea id="ytText" placeholder="Optional: paste a transcript here only if the automatic grab fails..." rows="4"></textarea>
       <div class="row">
         <button onclick="saveYouTube()">Save to Brain</button>
         <span class="msg" id="ytMsg"></span>
@@ -234,9 +234,9 @@
 
     <!-- URL -->
     <div class="panel card" id="panel-url">
-      <p class="help">Browsers block one website from reading another, so paste the article text yourself for now. Open the page, select the article, copy, and paste it below. (In Level 3 this becomes automatic.)</p>
+      <p class="help">Paste a page link and tap <b>Save to Brain</b>. Your brain reads the page by itself. If a site blocks it, paste the article text in the box yourself and save again.</p>
       <div class="field"><input type="url" id="urlUrl" placeholder="https://..."></div>
-      <textarea id="urlText" placeholder="Paste the article text here..." rows="6"></textarea>
+      <textarea id="urlText" placeholder="Optional: paste the article text here only if the automatic read fails..." rows="4"></textarea>
       <div class="row">
         <button onclick="saveUrl()">Save to Brain</button>
         <span class="msg" id="urlMsg"></span>
@@ -521,10 +521,30 @@
     }, 300)
   }
 
+  // Ask the server to fetch and save a link (it can read other sites; the browser can't)
+  async function captureLink(url, msgId) {
+    setMsg(msgId, 'Reading it... this can take up to 30 seconds', true)
+    const { data, error } = await db.functions.invoke('capture', { body: { url } })
+    if (error) throw new Error(error.message)
+    if (!data || !data.ok) throw new Error((data && data.error) || 'Capture failed')
+    return data
+  }
+
   async function saveYouTube() {
     const text = decodeEntities($('ytText').value).trim()
     if (!ytVideo) return setMsg('ytMsg', 'Paste a YouTube link first.', false)
-    if (!text) return setMsg('ytMsg', 'Paste the transcript first.', false)
+    if (!text) {
+      try {
+        const r = await captureLink('https://www.youtube.com/watch?v=' + ytVideo.id, 'ytMsg')
+        $('ytUrl').value = ''; $('ytPreview').style.display = 'none'; ytVideo = null
+        setMsg('ytMsg', r.kind === 'youtube_description'
+          ? '✓ Saved the description (no transcript was available)'
+          : '✓ Saved the transcript (' + r.chars.toLocaleString() + ' characters)', true)
+      } catch (e) {
+        setMsg('ytMsg', '✗ ' + e.message + ' You can paste the transcript below and save again.', false)
+      }
+      return
+    }
     try {
       const t = await saveThought('📹 YouTube: ' + ytVideo.title + '\n\n' + text, { video_id: ytVideo.id })
       await saveSource(t.id, text, 'youtube_transcript')
@@ -595,7 +615,16 @@
     const url = $('urlUrl').value.trim()
     const text = decodeEntities($('urlText').value).trim()
     if (!url) return setMsg('urlMsg', 'Paste the page link first.', false)
-    if (!text) return setMsg('urlMsg', 'Paste the article text first.', false)
+    if (!text) {
+      try {
+        const r = await captureLink(url, 'urlMsg')
+        $('urlUrl').value = ''
+        setMsg('urlMsg', '✓ Saved: ' + r.title, true)
+      } catch (e) {
+        setMsg('urlMsg', '✗ ' + e.message + ' You can paste the text below and save again.', false)
+      }
+      return
+    }
     try {
       const t = await saveThought('🔗 Web: ' + url + '\n\n' + text, { url })
       await saveSource(t.id, text, 'web')
