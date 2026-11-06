@@ -1,10 +1,11 @@
 // Open Brain MCP server.
 // MCP (Model Context Protocol) is the open standard AI apps use to call tools.
 // Claude Desktop connects here (through mcp-remote) and gets tools to search,
-// list, add to and recap your brain. Every request must carry your
+// list, add to, link and recap your brain. Every request must carry your
 // MCP_ACCESS_KEY, and every query is limited to your own thoughts (OWNER_USER_ID).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import { weeklyRecap } from '../_shared/life.ts'
+import { relatedThoughts, searchBrain } from '../_shared/search.ts'
 
 const OWNER = Deno.env.get('OWNER_USER_ID') ?? ''
 const db = createClient(
@@ -24,8 +25,13 @@ const json = (body: unknown, status = 200) =>
 const TOOLS = [
   {
     name: 'search_thoughts',
-    description: "Search Spencer's brain (notes, YouTube transcripts, articles, workouts, spending, priorities) for a word or phrase. Returns up to 10 matches, newest first.",
-    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Word or phrase to look for' } }, required: ['query'] },
+    description: "Search Spencer's brain (notes, YouTube transcripts, articles, workouts, spending, priorities) by meaning, so different wording still matches. Returns up to 10 matches, closest first.",
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'What to look for, in plain words' } }, required: ['query'] },
+  },
+  {
+    name: 'related_thoughts',
+    description: "Given a thought's id (from search_thoughts or list_recent), list the other thoughts the brain has linked to it by meaning.",
+    inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'The thought id' } }, required: ['id'] },
   },
   {
     name: 'list_recent',
@@ -44,33 +50,23 @@ const TOOLS = [
   },
 ]
 
-interface Thought { id: string; content: string; created_at: string }
+interface Thought { id: string; content: string; created_at: string; similarity?: number }
 
 const format = (rows: Thought[]) => rows.length
-  ? rows.map(r => `[${r.created_at.slice(0, 10)}] (id ${r.id})\n${r.content}`).join('\n\n---\n\n')
+  ? rows.map(r => `[${r.created_at.slice(0, 10)}] (id ${r.id})${r.similarity ? ` match ${Math.round(r.similarity * 100)}%` : ''}\n${r.content}`).join('\n\n---\n\n')
   : 'No thoughts found.'
-
-async function search(query: string): Promise<Thought[]> {
-  const base = () => db.from('thoughts').select('id, content, created_at').eq('user_id', OWNER)
-    .order('created_at', { ascending: false }).limit(10)
-  // Exact phrase first
-  const { data, error } = await base().ilike('content', `%${query}%`)
-  if (error) throw error
-  if (data?.length) return data
-  // Otherwise match any of the words (skipping short ones like "the")
-  const words = query.split(/\s+/).map(w => w.replace(/[^\p{L}\p{N}'-]/gu, '')).filter(w => w.length > 2)
-  if (!words.length) return []
-  const r = await base().or(words.map(w => `content.ilike.%${w}%`).join(','))
-  if (r.error) throw r.error
-  return r.data ?? []
-}
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<string> {
   switch (name) {
     case 'search_thoughts': {
       const q = String(args.query ?? '').trim()
       if (!q) return 'Please give a search query.'
-      return format(await search(q))
+      return format(await searchBrain(db, OWNER, q))
+    }
+    case 'related_thoughts': {
+      const id = String(args.id ?? '').trim()
+      if (!id) return 'Please give a thought id.'
+      return format(await relatedThoughts(db, OWNER, id))
     }
     case 'list_recent': {
       const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 50)

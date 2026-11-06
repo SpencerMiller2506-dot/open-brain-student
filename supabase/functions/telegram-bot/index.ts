@@ -1,11 +1,12 @@
 // Telegram bot for Open Brain.
-// Text it anything and it saves to your brain. "/search word" or "? word" searches,
+// Text it anything and it saves to your brain. "/search words" or "? words" searches by meaning,
 // "/recent" shows your last 5. Send just a link and it saves the YouTube
 // transcript or the page's text. "workout:", "ate:", "spent:" and friends log your
 // day, "/week" recaps it. A scheduled job (see the cron SQL) can also ask it to send
 // the morning check-in or the Sunday recap. Only answers your own chat (TELEGRAM_CHAT_ID).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import { captureAny, loneUrl, saveCapture } from '../_shared/capture.ts'
+import { searchBrain } from '../_shared/search.ts'
 import { confirmLog, HELP, morningCheckIn, parseLog, saveLog, weeklyRecap } from '../_shared/life.ts'
 
 const TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? ''
@@ -74,11 +75,8 @@ Deno.serve(async (req) => {
         await reply(chatId, 'Search for what? Try: /search leadership')
         return ok
       }
-      const { data, error } = await db.from('thoughts').select('content, created_at')
-        .eq('user_id', OWNER).ilike('content', `%${q}%`)
-        .order('created_at', { ascending: false }).limit(5)
-      if (error) throw error
-      await reply(chatId, data?.length ? `Found ${data.length}:\n\n${list(data)}` : `Nothing found for "${q}".`)
+      const data = await searchBrain(db, OWNER, q, 5)
+      await reply(chatId, data.length ? `Found ${data.length}:\n\n${list(data)}` : `Nothing found for "${q}".`)
     } else if (t.startsWith('/recent')) {
       const { data, error } = await db.from('thoughts').select('content, created_at')
         .eq('user_id', OWNER).order('created_at', { ascending: false }).limit(5)
