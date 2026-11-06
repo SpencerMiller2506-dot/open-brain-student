@@ -50,10 +50,12 @@ const TOOLS = [
   },
 ]
 
-interface Thought { id: string; content: string; created_at: string; similarity?: number }
+interface Thought { id: string; content: string; created_at: string; similarity?: number; matched_chunk?: string | null }
 
 const format = (rows: Thought[]) => rows.length
-  ? rows.map(r => `[${r.created_at.slice(0, 10)}] (id ${r.id})${r.similarity ? ` match ${Math.round(r.similarity * 100)}%` : ''}\n${r.content}`).join('\n\n---\n\n')
+  ? rows.map(r => `[${r.created_at.slice(0, 10)}] (id ${r.id})${r.similarity ? ` match ${Math.round(r.similarity * 100)}%` : ''}`
+      + (r.matched_chunk ? `\nMatched part (from partway through a longer capture):\n"${r.matched_chunk}"\n\nFull text:` : '')
+      + `\n${r.content}`).join('\n\n---\n\n')
   : 'No thoughts found.'
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<string> {

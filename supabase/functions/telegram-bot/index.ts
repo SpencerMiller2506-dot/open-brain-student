@@ -24,9 +24,11 @@ async function reply(chatId: number, text: string) {
   })
 }
 
-function list(rows: { content: string; created_at: string }[]) {
+function list(rows: { content: string; created_at: string; matched_chunk?: string | null }[]) {
   return rows
-    .map((r, i) => `${i + 1}. ${r.content.slice(0, 300)}\n   (${r.created_at.slice(0, 10)})`)
+    .map((r, i) => r.matched_chunk
+      ? `${i + 1}. ${r.content.split('\n')[0].slice(0, 120)}\n   ...${r.matched_chunk.slice(0, 250)}...\n   (${r.created_at.slice(0, 10)}, from partway through)`
+      : `${i + 1}. ${r.content.slice(0, 300)}\n   (${r.created_at.slice(0, 10)})`)
     .join('\n\n')
 }
 

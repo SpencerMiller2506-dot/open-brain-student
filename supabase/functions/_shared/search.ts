@@ -15,25 +15,28 @@ export async function embed(text: string): Promise<number[]> {
   return Array.from(out as ArrayLike<number>)
 }
 
-export interface Hit { id: string; content: string; created_at: string; similarity?: number }
+export interface Hit { id: string; content: string; created_at: string; similarity?: number; matched_chunk?: string | null }
 
-// Meaning matches first, then exact-word matches the meaning search missed
+// Hybrid search: meaning (whole thoughts and pieces of long captures) + exact words,
+// fused into one ranked list by the database. Falls back to plain word matching if needed.
 export async function searchBrain(db: SupabaseClient, owner: string, query: string, count = 10): Promise<Hit[]> {
-  const hits: Hit[] = []
-  try {
-    const { data, error } = await db.rpc('match_thoughts', {
-      query_embedding: await embed(query), owner, match_count: count, min_similarity: 0.75,
-    })
-    if (error) throw error
-    hits.push(...(data ?? []))
-  } catch (e) {
-    console.error('meaning search failed, using words only:', e instanceof Error ? e.message : e)
+  let vector: number[] | null = null
+  try { vector = await embed(query) } catch (e) {
+    console.error('embedding failed, exact words only:', e instanceof Error ? e.message : e)
   }
-  const { data, error } = await db.from('thoughts').select('id, content, created_at')
-    .eq('user_id', owner).ilike('content', `%${query}%`)
-    .order('created_at', { ascending: false }).limit(count)
-  if (error) throw error
-  for (const r of data ?? []) if (!hits.some(h => h.id === r.id)) hits.push(r)
+  const hits: Hit[] = []
+  const { data, error } = await db.rpc('hybrid_search', {
+    query_text: query, query_embedding: vector, owner, match_count: count,
+  })
+  if (error) console.error('hybrid search failed:', error.message)
+  else hits.push(...(data ?? []))
+  if (hits.length < count) {
+    const { data: words, error: wErr } = await db.from('thoughts').select('id, content, created_at')
+      .eq('user_id', owner).ilike('content', `%${query}%`)
+      .order('created_at', { ascending: false }).limit(count)
+    if (wErr) throw wErr
+    for (const r of words ?? []) if (!hits.some(h => h.id === r.id)) hits.push(r)
+  }
   return hits.slice(0, count)
 }
 
