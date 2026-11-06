@@ -123,6 +123,26 @@ Deno.serve(async (req) => {
           serverInfo: { name: 'open-brain', version: '1.0.0' },
           instructions: "This is Spencer's personal brain. Search it whenever Spencer asks about something he saved, learned, logged or worked on.",
         })
+      // Not a tool Claude sees: the Obsidian sync uses this to copy your whole brain
+      case 'brain/export': {
+        const thoughts: unknown[] = []
+        for (let from = 0; ; from += 500) {
+          const { data, error } = await db.from('thoughts').select('id, content, created_at, metadata')
+            .eq('user_id', OWNER).order('created_at').range(from, from + 499)
+          if (error) throw error
+          thoughts.push(...(data ?? []))
+          if ((data ?? []).length < 500) break
+        }
+        const links: unknown[] = []
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await db.from('thought_links').select('source_thought_id, target_thought_id, similarity_score')
+            .eq('user_id', OWNER).range(from, from + 999)
+          if (error) throw error
+          links.push(...(data ?? []))
+          if ((data ?? []).length < 1000) break
+        }
+        return result({ thoughts, links })
+      }
       case 'ping':
         return result({})
       case 'tools/list':
